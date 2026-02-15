@@ -1,5 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { T, SERVICED_AREAS, PRICING, WEEKLY_DISCOUNT, calcQuote, generateMockEnquiry, generateMockFormSubmission, getInitialEnquiries, getInitialQuotes } from "./shared";
+import { useState, 
+  const removeEnquiry = (enqId) => {
+    if (!window.confirm("Remove this enquiry? This will also remove any linked quote.")) return;
+    setEnquiries(prev => prev.filter(e => e.id !== enqId));
+    setQuotes(prev => prev.filter(q => q.enquiryId !== enqId));
+    setSelectedEnquiry(prev => (prev && prev.id === enqId ? null : prev));
+    showToast("🗑️ Enquiry removed");
+  };
+
+useEffect, useRef, useCallback } from "react";
+import { T, SERVICED_AREAS, PRICING, WEEKLY_DISCOUNT, calcQuote } from "./shared";
 
 // ═══════════════════════════════════════════════════════════
 // DUST BUNNIES CLEANING — Admin Dashboard (Functional Demo)
@@ -65,36 +74,50 @@ function Modal({ title, onClose, children, wide }) {
 
 export default function Dashboard() {
   const [page, setPage] = useState("inbox");
-  const [enquiries, setEnquiries] = useState(getInitialEnquiries);
-  const [quotes, setQuotes] = useState(getInitialQuotes);
+  const [enquiries, setEnquiries] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("db_enquiries") || "[]"); } catch { return []; }
+  });
+  const [quotes, setQuotes] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("db_quotes") || "[]"); } catch { return []; }
+  });
   const [pricing, setPricing] = useState(PRICING);
   const [filter, setFilter] = useState("all");
   const [toast, setToast] = useState(null);
-  const [demoMode, setDemoMode] = useState(false);
-  const [selectedEnquiry, setSelectedEnquiry] = useState(null);
+    const [selectedEnquiry, setSelectedEnquiry] = useState(null);
   const [editQuoteModal, setEditQuoteModal] = useState(null);
   const [editPriceModal, setEditPriceModal] = useState(null);
   const [previewQuote, setPreviewQuote] = useState(null);
-  const demoInterval = useRef(null);
-  const quoteCounter = useRef(3);
+    const quoteCounter = useRef(3);
 
   const showToast = useCallback((msg) => setToast(msg), []);
 
-  // ─── Demo Mode: simulate incoming enquiries ───
-  useEffect(() => {
-    if (demoMode) {
-      demoInterval.current = setInterval(() => {
-        const newEnq = generateMockEnquiry();
-        setEnquiries(prev => [newEnq, ...prev]);
-        showToast(`📩 New ${newEnq.channel} message from ${newEnq.name}`);
-      }, 6000);
-    } else {
-      clearInterval(demoInterval.current);
-    }
-    return () => clearInterval(demoInterval.current);
-  }, [demoMode, showToast]);
 
-  // ─── Cross-tab: listen for customer form submissions ───
+  
+  // ─── On load: pick up any recent form submission (same-tab or previous) ───
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("db_form_submission");
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      // Only ingest once per submission
+      const already = enquiries.some(e => e.details?.submittedAt === data.submittedAt && e.name === data.name);
+      if (!already) {
+        const enq = {
+          id: Date.now(),
+          name: data.name, channel: "email", suburb: data.suburb,
+          message: `Form submitted: ${data.bedrooms} bed, ${data.bathrooms} bath, ${data.frequency} clean`,
+          status: "info_received",
+          timestamp: new Date().toISOString(),
+          avatar: data.name.split(" ").map(n => n[0]).join(""),
+          details: data, quoteId: null,
+        };
+        setEnquiries(prev => [enq, ...prev]);
+        showToast(`📋 New form submission from ${data.name}!`);
+      }
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+// ─── Cross-tab: listen for customer form submissions ───
   useEffect(() => {
     const handler = (e) => {
       if (e.key === "db_form_submission") {
@@ -118,17 +141,22 @@ export default function Dashboard() {
     return () => window.removeEventListener("storage", handler);
   }, [showToast]);
 
-  // ─── Actions ───
+  
+  // ─── Persist to localStorage ───
+  useEffect(() => {
+    try { localStorage.setItem("db_enquiries", JSON.stringify(enquiries)); } catch {}
+  }, [enquiries]);
+
+  useEffect(() => {
+    try { localStorage.setItem("db_quotes", JSON.stringify(quotes)); } catch {}
+  }, [quotes]);
+
+// ─── Actions ───
   const sendInfoForm = (enqId) => {
     setEnquiries(prev => prev.map(e => e.id === enqId ? { ...e, status: "info_requested" } : e));
     showToast("📤 Info form link sent!");
   };
 
-  const simulateInfoReceived = (enqId) => {
-    const mock = generateMockFormSubmission();
-    setEnquiries(prev => prev.map(e => e.id === enqId ? { ...e, status: "info_received", details: { ...mock, name: e.name, suburb: e.suburb } } : e));
-    showToast(`📋 Details received from customer`);
-  };
 
   const generateQuote = (enqId) => {
     const enq = enquiries.find(e => e.id === enqId);
@@ -227,18 +255,6 @@ export default function Dashboard() {
             </button>
           ))}
         </nav>
-
-        {/* Demo Mode Toggle */}
-        <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: 16, marginTop: 16 }}>
-          <button onClick={() => setDemoMode(!demoMode)} style={{
-            width: "100%", padding: "10px 14px", borderRadius: T.radiusSm, border: "none", cursor: "pointer",
-            background: demoMode ? T.accent : "rgba(255,255,255,0.08)", color: demoMode ? T.sidebar : "#8FBFA8",
-            fontSize: 13, fontWeight: 700, textAlign: "center", transition: "all 0.2s",
-          }}>
-            {demoMode ? "🎬 Demo Running..." : "🎬 Start Demo Mode"}
-          </button>
-          {demoMode && <p style={{ color: T.accent, fontSize: 10, textAlign: "center", marginTop: 6 }}>New enquiries arriving...</p>}
-        </div>
       </div>
 
       {/* ═══ Main Content ═══ */}
@@ -300,10 +316,7 @@ export default function Dashboard() {
                         {e.status === "new" && SERVICED_AREAS.includes(e.suburb) && (
                           <button onClick={() => sendInfoForm(e.id)} style={actionBtn(T.blueLight, T.blue)}>📤 Send Info Form</button>
                         )}
-                        {e.status === "info_requested" && (
-                          <button onClick={() => simulateInfoReceived(e.id)} style={actionBtn(T.accentLight, "#8B6914")}>⏳ Simulate Info Received</button>
-                        )}
-                        {e.status === "info_received" && !e.quoteId && (
+                                                {e.status === "info_received" && !e.quoteId && (
                           <button onClick={() => generateQuote(e.id)} style={actionBtn(T.primaryLight, T.primaryDark)}>💰 Generate Quote</button>
                         )}
                         {e.status === "quote_ready" && (
@@ -312,6 +325,7 @@ export default function Dashboard() {
                         {e.details && (
                           <button onClick={() => setSelectedEnquiry(e)} style={actionBtn(T.borderLight, T.textMuted)}>📋 View Details</button>
                         )}
+                        <button onClick={() => removeEnquiry(e.id)} style={actionBtn("#FDF0EF", T.danger)}>🗑️ Remove</button>
                       </div>
                     </div>
                   </div>
